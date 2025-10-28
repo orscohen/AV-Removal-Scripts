@@ -161,7 +161,46 @@ function Remove-FromPrograms {
     }
 }
 
-Write-Host "Step 1: Stopping Services" -ForegroundColor Cyan
+Write-Host "Step 1: Running Official Uninstaller" -ForegroundColor Cyan
+Write-Host "-------------------------------------" -ForegroundColor Cyan
+
+# Try to run the official CarbonBlack uninstaller if it exists
+$uninstallerPaths = @(
+    "$env:windir\CarbonBlack\uninst.exe",
+    "$env:ProgramFiles\CarbonBlack\uninst.exe",
+    "$env:ProgramFiles (x86)\CarbonBlack\uninst.exe"
+)
+
+$uninstallerFound = $false
+foreach ($uninstPath in $uninstallerPaths) {
+    if (Test-Path $uninstPath) {
+        $uninstallerFound = $true
+        Write-Host "[FOUND] Official uninstaller at: $uninstPath" -ForegroundColor Green
+        try {
+            Write-Host "[INFO] Running uninstaller silently..." -ForegroundColor Yellow
+            # Run uninstaller with silent flag
+            $process = Start-Process -FilePath $uninstPath -ArgumentList "/S" -Wait -PassThru -NoNewWindow
+            if ($process.ExitCode -eq 0) {
+                Write-Host "[SUCCESS] Official uninstaller completed successfully" -ForegroundColor Green
+            }
+            else {
+                Write-Host "[WARNING] Uninstaller exit code: $($process.ExitCode)" -ForegroundColor Yellow
+            }
+            Start-Sleep -Seconds 3
+        }
+        catch {
+            Write-Host "[ERROR] Failed to run official uninstaller: $($_.Exception.Message)" -ForegroundColor Red
+        }
+        break
+    }
+}
+
+if (-not $uninstallerFound) {
+    Write-Host "[INFO] Official uninstaller not found, proceeding with manual removal" -ForegroundColor Gray
+}
+
+Write-Host ""
+Write-Host "Step 2: Stopping Services" -ForegroundColor Cyan
 Write-Host "-------------------------" -ForegroundColor Cyan
 
 # Stop services first
@@ -182,7 +221,56 @@ foreach ($svc in $services) {
 }
 
 Write-Host ""
-Write-Host "Step 2: Uninstalling from Programs" -ForegroundColor Cyan
+Write-Host "Step 2: Stopping Services" -ForegroundColor Cyan
+Write-Host "-------------------------" -ForegroundColor Cyan
+
+# Stop services first
+$services = @("CarbonBlack", "carbonblackk", "cbstream")
+foreach ($svc in $services) {
+    $service = Get-Service -Name $svc -ErrorAction SilentlyContinue
+    if ($service -and $service.Status -eq 'Running') {
+        try {
+            Write-Host "[INFO] Stopping service: $svc..." -ForegroundColor Yellow
+            Stop-Service -Name $svc -Force -ErrorAction Stop
+            Start-Sleep -Seconds 2
+            Write-Host "[SUCCESS] Stopped service: $svc" -ForegroundColor Green
+        }
+        catch {
+            Write-Host "[WARNING] Could not stop service: $svc" -ForegroundColor Yellow
+        }
+    }
+}
+
+Write-Host ""
+Write-Host "Step 3: Uninstalling via MSI (if available)" -ForegroundColor Cyan
+Write-Host "--------------------------------------------" -ForegroundColor Cyan
+
+# Try common CarbonBlack MSI product codes
+$msiCodes = @(
+    "{D42B4556-1408-4398-92F7-A2CB162AF048}"
+)
+
+foreach ($code in $msiCodes) {
+    Write-Host "[INFO] Attempting MSI uninstall for product code: $code" -ForegroundColor Yellow
+    try {
+        $process = Start-Process "msiexec.exe" -ArgumentList "/X$code /qn /norestart" -Wait -PassThru -NoNewWindow
+        if ($process.ExitCode -eq 0) {
+            Write-Host "[SUCCESS] MSI uninstall completed for: $code" -ForegroundColor Green
+        }
+        elseif ($process.ExitCode -eq 1605) {
+            Write-Host "[INFO] Product code not found: $code" -ForegroundColor Gray
+        }
+        else {
+            Write-Host "[WARNING] MSI uninstall exit code $($process.ExitCode) for: $code" -ForegroundColor Yellow
+        }
+    }
+    catch {
+        Write-Host "[WARNING] Could not execute MSI uninstall for: $code" -ForegroundColor Yellow
+    }
+}
+
+Write-Host ""
+Write-Host "Step 4: Uninstalling from Programs" -ForegroundColor Cyan
 Write-Host "-----------------------------------" -ForegroundColor Cyan
 
 # Try to uninstall via Windows uninstaller
@@ -191,7 +279,7 @@ Remove-FromPrograms -DisplayName "Cb Defense"
 Remove-FromPrograms -DisplayName "Cb Enterprise Response"
 
 Write-Host ""
-Write-Host "Step 3: Removing Installation Folders" -ForegroundColor Cyan
+Write-Host "Step 5: Removing Installation Folders" -ForegroundColor Cyan
 Write-Host "--------------------------------------" -ForegroundColor Cyan
 
 # Remove installation directories
@@ -208,7 +296,7 @@ foreach ($folder in $folders) {
 }
 
 Write-Host ""
-Write-Host "Step 4: Removing Registry Keys" -ForegroundColor Cyan
+Write-Host "Step 6: Removing Registry Keys" -ForegroundColor Cyan
 Write-Host "-------------------------------" -ForegroundColor Cyan
 
 # Remove service registry keys
@@ -239,7 +327,7 @@ foreach ($productPath in $productCodePaths) {
 }
 
 Write-Host ""
-Write-Host "Step 5: Deleting Services" -ForegroundColor Cyan
+Write-Host "Step 7: Deleting Services" -ForegroundColor Cyan
 Write-Host "-------------------------" -ForegroundColor Cyan
 
 # Delete services
@@ -248,7 +336,7 @@ foreach ($svc in $services) {
 }
 
 Write-Host ""
-Write-Host "Step 6: Cleaning up Windows Installer Cache" -ForegroundColor Cyan
+Write-Host "Step 8: Cleaning up Windows Installer Cache" -ForegroundColor Cyan
 Write-Host "--------------------------------------------" -ForegroundColor Cyan
 
 # Clean up Windows Installer cache for CarbonBlack
